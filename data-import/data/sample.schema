@@ -1,0 +1,10 @@
+FirstName VARCHAR(500),
+Email VARCHAR,
+Phone VARCHAR,
+DOB DATE,
+Age INTEGER,
+Salary NUMERIC,
+Active BOOLEAN,
+Membership VARCHAR,
+Address VARCHAR,
+City VARCHAR

@@ -5,49 +5,28 @@ import re
 import time
 import sys
 import logging
+import traceback
 
-print("Starting Import CSV script")
-
-# Database connection parameters
-db_params = {
-    'dbname': 'mydb',
-    'user': 'myuser',
-    'password': 'mypassword',
-    'host': 'postgres',
-    'port': '5432',
-}
-
-# Set up logging
-logging.basicConfig(filename='import_log.log', level=logging.INFO)
+def log_and_print(message):
+    print(message)
+    logging.info(message)
 
 # Function to wait for PostgreSQL server to become available
-def wait_for_postgres(host, port, username, password, dbname, max_attempts=30, delay_seconds=2):
-    print("Running Wait For Postgres")
+def wait_for_postgres(host, port, user, password, dbname, max_attempts=30, delay_seconds=2):
     for attempt in range(1, max_attempts + 1):
         try:
             conn = psycopg2.connect(
                 dbname=dbname,
-                user=username,
+                user=user,
                 password=password,
                 host=host,
                 port=port
             )
             conn.close()
-            print(f"Connected to PostgreSQL (attempt {attempt}/{max_attempts}).")
             return True
         except psycopg2.OperationalError:
-            print(f"Waiting for PostgreSQL (attempt {attempt}/{max_attempts})...")
             time.sleep(delay_seconds)
-    print("Error: Unable to connect to PostgreSQL server.")
     return False
-
-# Wait for PostgreSQL server to start
-if not wait_for_postgres(db_params['host'], db_params['port'], db_params['user'], db_params['password'], db_params['dbname']):
-    print("Error: Unable to connect to PostgreSQL server.")
-    sys.exit(1)
-
-else:
-    print("PostgreSQL server is ready. Proceeding with data insertion.")
 
 # Function to infer data types and estimate column sizes
 def infer_data_types_and_sizes(csv_file):
@@ -87,71 +66,121 @@ def infer_data_types_and_sizes(csv_file):
 
         return header, column_data_types, column_sizes
 
+# Function to read table definitions from schema files
+def read_table_definition(schema_file):
+    header = []            # To store column names
+    data_types = {}        # To store data types
+    column_sizes = {}      # To store column sizes
+
+    with open(schema_file, 'r') as schema_file_handle:
+        for line in schema_file_handle:
+            # Split each line using commas
+            parts = line.strip().split(',')
+            # Remove empty parts and strip whitespace
+            parts = [part.strip() for part in parts if part.strip()]
+            if parts:
+                if len(parts) == 1:
+                    # If only one part is present, it's a single string, so convert it to a list
+                    parts = [parts[0]]
+
+                # Extract column name and data type
+                column_name, *rest = parts[0].split()
+                data_type = ' '.join(rest) if rest else 'VARCHAR'  # Default to VARCHAR if no data type specified
+
+                # Append column name and data type to their respective lists/dictionaries
+                header.append(column_name)
+                data_types[len(header) - 1] = data_type
+
+                # Check if a column size is specified for VARCHAR
+                if data_type.startswith('VARCHAR'):
+                    match = re.search(r'\((\d+)\)', data_type)
+                    if match:
+                        column_sizes[len(header) - 1] = int(match.group(1))
+    return header, data_types, column_sizes
+
+# Function to create a database table
+def create_table(cursor, table_name, header, data_types, column_sizes):
+    # Create the table with the inferred data types and sizes
+    columns_sql = ', '.join([f'"{column_name.lower()}" {data_types.get(i, "VARCHAR")}' if data_types.get(i, "VARCHAR") != 'VARCHAR' else
+                            f'"{column_name.lower()}" {data_types.get(i, "VARCHAR")}({column_sizes.get(i, 255)})'
+                            for i, column_name in enumerate(header)])
+    create_table_sql = f"""
+    CREATE TABLE IF NOT EXISTS "{table_name}" (
+        {columns_sql}
+    );
+    """
+    cursor.execute(create_table_sql)
+    log_and_print(f"Schema created for table {table_name}: {create_table_sql}")
+
+# Function to insert data into a database table
+def insert_data(cursor, table_name, header, csv_file):
+    with open(csv_file, 'r') as csv_file_handle:
+        csv_reader = csv.reader(csv_file_handle)
+        next(csv_reader)  # Skip header row
+
+        # Construct the INSERT statement with lowercase column names
+        insert_sql = f'INSERT INTO "{table_name}" ({", ".join(header).lower()}) VALUES ({", ".join(["%s"] * len(header))})'
+       
+        # Insert data into the table, logging errors
+        for row in csv_reader:
+            try:
+                cursor.execute(insert_sql, row)
+                log_and_print(f"Data inserted into table {table_name}: {row}")
+            except Exception as e:
+                logging.error(f"Error inserting row {row} into {table_name}: {e}")
+
+# Database connection parameters
+db_params = {
+    'dbname': 'mydb',
+    'user': 'myuser',
+    'password': 'mypassword',
+    'host': 'postgres',
+    'port': '5432',
+}
+
+# Set up logging
+logging.basicConfig(filename='import_log.log', level=logging.INFO)
+
+log_and_print("Starting Import CSV script")
+
+# Wait for PostgreSQL server to start
+if not wait_for_postgres(**db_params):
+    log_and_print("Error: Unable to connect to PostgreSQL server.")
+    sys.exit(1)
+
+log_and_print("PostgreSQL server is ready. Proceeding with data insertion.")
+
 # Iterate through all CSV files in the 'data' folder
 for root, dirs, files in os.walk('data'):
     for file in files:
         if file.endswith('.csv'):
             csv_file = os.path.join(root, file)
-            # Add a print statement to indicate the file being processed
-            print(f"Processing CSV file: {csv_file}")
-
             table_name = os.path.splitext(file)[0]  # Extract table name from file name (excluding extension)
+            schema_file = os.path.join(root, f"{table_name}.schema")  # Path to corresponding schema file
 
             try:
                 conn = psycopg2.connect(**db_params)
                 cursor = conn.cursor()
 
-                header, data_types, column_sizes = infer_data_types_and_sizes(csv_file)
+                # Drop the table if it exists
+                drop_table_sql = f'DROP TABLE IF EXISTS "{table_name}"'
+                cursor.execute(drop_table_sql)
 
+                if os.path.exists(schema_file):
+                    header, data_types, column_sizes = read_table_definition(schema_file)
+                else:
+                    header, data_types, column_sizes = infer_data_types_and_sizes(csv_file)
 
-                # Generate column definitions for table creation
-                column_definitions = []
-                for i, column_name in enumerate(header):
-                    data_type = data_types.get(i, 'VARCHAR')  # Default to VARCHAR
-                    size = column_sizes.get(i, 255)  # Default size is 255
+                create_table(cursor, table_name, header, data_types, column_sizes)
 
-                    # Adjust the size to the nearest increment (e.g., 100 or 255)
-                    increment = 100  # You can adjust this as needed
-                    size = ((size - 1) // increment + 1) * increment
-
-                    if data_type == 'VARCHAR':
-                        column_definitions.append(f'"{column_name.lower()}" {data_type}({size})')
-                    else:
-                        column_definitions.append(f'"{column_name.lower()}" {data_type}')
-
-                # Create the table with dynamically generated columns (all in lowercase)
-                create_table_sql = f"""
-                CREATE TABLE IF NOT EXISTS "{table_name}" (
-                    {', '.join(column_definitions)}
-                );
-                """
-                print(f"Creating table {table_name}...")
-                cursor.execute(create_table_sql)
-                conn.commit()
-                print(f"Table {table_name} created successfully.")
-
-                # Open the CSV file for reading
-                with open(csv_file, 'r') as csv_file_handle:
-                    csv_reader = csv.reader(csv_file_handle)
-                    next(csv_reader)  # Skip header row
-
-                    # Construct the INSERT statement with lowercase column names
-                    insert_sql = f'INSERT INTO "{table_name}" ({", ".join(header).lower()}) VALUES ({", ".join(["%s"] * len(header))})'
-
-                    # Insert data into the table, logging errors
-                    for row in csv_reader:
-                        try:
-                            cursor.execute(insert_sql, row)
-                            print(f"Inserted row into {table_name}: {row}")
-                        except Exception as e:
-                            logging.error(f"Error inserting row {row} into {table_name}: {e}")
-                            print(f"Error inserting row {row} into {table_name}: {e}")
+                insert_data(cursor, table_name, header, csv_file)
 
                 conn.commit()
-                print(f"Data inserted into table {table_name} successfully.")
+                log_and_print(f"Data inserted into table {table_name} successfully.")
             except Exception as e:
-                logging.error(f"Error processing {csv_file}: {e}")
-                print(f"Error processing {csv_file}: {e}")
+                error_message = f"Error processing {csv_file}: {e}\n{traceback.format_exc()}"
+                logging.error(error_message)
+                print(error_message)
             finally:
                 cursor.close()
                 conn.close()
