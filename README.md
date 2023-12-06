@@ -24,19 +24,25 @@ To get this project up and running on your local machine, follow these steps:
    cd csv2postgres
    ```
 
-3. Build and run the Docker containers:
+3. Make the `docker_setup.sh` executable
 
    ```bash
-   ./setup_environment.sh
+   chmod +x docker_setup.sh
+   ```
+
+4. Build and run the Docker containers:
+
+   ```bash
+   ./docker_setup.sh
    ```
 
    This command will build the Docker images and start the PostgreSQL database and the CSV importer container.
 
-4. Wait for the containers to start and execute the CSV import script.
+5. Wait for the containers to start and execute the CSV import script.
 
    The PostgreSQL container will initialize the database schema using the `init.sql` script, and the CSV importer container will run the `import_csv.py` script to import CSV data into the database.
 
-5. Once the containers are running and the data is imported, you can access your PostgreSQL database as needed.
+6. Once the containers are running and the data is imported, you can access your PostgreSQL database as needed.
 
 ## Usage
 
@@ -90,12 +96,12 @@ Here is a list of common PostgreSQL data types that you can use in your `.schema
 
 You can specify these data types in your `.schema` file when defining the table schema.
 
-## Cleanup
+## Restarting
 
-To stop and remove the Docker containers and clean up resources, run the following command:
+To stop, remove the Docker containers and clean up resources, and then spin the containers back up again so they rebuild the database tables:
 
 ```bash
-./setup_environment.sh down
+./docker_setup.sh
 ```
 
 ## Contributing
