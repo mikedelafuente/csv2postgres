@@ -39,10 +39,20 @@ def infer_data_types_and_sizes(csv_file):
         column_sizes = {}
 
         # Regular expressions for pattern matching
+
         date_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+        time_pattern = re.compile(r'^\d{2}:\d{2}:\d{2}$')
+        timestamp_pattern = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$')
         int_pattern = re.compile(r'^-?\d+$')
         float_pattern = re.compile(r'^-?\d+\.\d+$')
         bool_pattern = re.compile(r'^(true|false)$', re.IGNORECASE)
+        uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
+
+        # Default VARCHAR size for columns not explicitly defined
+        default_varchar_size = 255
+
+        # Initialize column_sizes to have enough elements for all columns
+        column_sizes = [f''] * len(header)
 
         # Analyze data to infer data types and estimate column sizes
         for row in reader:
@@ -50,6 +60,12 @@ def infer_data_types_and_sizes(csv_file):
                 # Check if the cell matches a date pattern
                 if date_pattern.match(cell):
                     column_data_types[i] = 'DATE'
+                # Check if the cell matches a time pattern
+                elif time_pattern.match(cell):
+                    column_data_types[i] = 'TIME'
+                # Check if the cell matches a timestamp pattern
+                elif timestamp_pattern.match(cell):
+                    column_data_types[i] = 'TIMESTAMP'
                 # Check if the cell matches an integer pattern
                 elif int_pattern.match(cell):
                     column_data_types[i] = 'INTEGER'
@@ -59,50 +75,82 @@ def infer_data_types_and_sizes(csv_file):
                 # Check if the cell matches a boolean pattern
                 elif bool_pattern.match(cell):
                     column_data_types[i] = 'BOOLEAN'
+                # Check if the cell matches a UUID pattern
+                elif uuid_pattern.match(cell):
+                    column_data_types[i] = 'UUID'
+                # Check if the cell matches a JSON or JSONB pattern
+                elif cell.startswith('{') and cell.endswith('}') or cell.startswith('[') and cell.endswith(']'):
+                    column_data_types[i] = 'JSONB'
+                else:
+                    # Default to VARCHAR if no other match
+                    column_data_types[i] = 'VARCHAR'
 
-                # Estimate column size based on the length of the cell
-                if i not in column_sizes or len(cell) > column_sizes[i]:
-                    column_sizes[i] = len(cell)
+                # Track max VARCHAR length for VARCHAR columns
+                if column_data_types[i] == 'VARCHAR':
+                    max_length = len(cell)
+                    if max_length > int(column_sizes[i].strip('()') or '255'):
+                        column_sizes[i] = f'({max_length})'
 
         return header, column_data_types, column_sizes
 
 # Function to read table definitions from schema files
+# Function to read table definitions from schema files
 def read_table_definition(schema_file):
     header = []            # To store column names
-    data_types = {}        # To store data types
-    column_sizes = {}      # To store column sizes
+    data_types = []        # To store data types
+    column_sizes = []
 
     with open(schema_file, 'r') as schema_file_handle:
         for line in schema_file_handle:
-            # Split each line using commas
-            parts = line.strip().split(',')
+            # Split each line using space
+            parts = line.strip().split(' ')
             # Remove empty parts and strip whitespace
             parts = [part.strip() for part in parts if part.strip()]
             if parts:
-                if len(parts) == 1:
-                    # If only one part is present, it's a single string, so convert it to a list
-                    parts = [parts[0]]
+                # Extract column name
+                column_name = parts[0]
+                if len(parts) > 1:
+                    # Extract data type
+                    data_type = ' '.join(parts[1:])  # Combine all parts from parts[1] and beyond
+                    log_and_print(f"Column Name: {column_name} || Data Type: {data_type}")
+             
+                    column_size = ''
+                    # Check if a column size is specified
+                    if '(' in data_type:
+                        start_index = data_type.find('(')
+                        end_index = data_type.find(')')
+                        if start_index != -1 and end_index != -1:
+                            column_size = data_type[start_index:end_index+1]
+                            # Remove the size part from data_type
+                            data_type = data_type[:start_index]
 
-                # Extract column name and data type
-                column_name, *rest = parts[0].split()
-                data_type = ' '.join(rest) if rest else 'VARCHAR'  # Default to VARCHAR if no data type specified
-
-                # Append column name and data type to their respective lists/dictionaries
-                header.append(column_name)
-                data_types[len(header) - 1] = data_type
-
-                # Check if a column size is specified for VARCHAR
-                if data_type.startswith('VARCHAR'):
-                    match = re.search(r'\((\d+)\)', data_type)
-                    if match:
-                        column_sizes[len(header) - 1] = int(match.group(1))
+                            log_and_print(f"matched: col_size: {column_size} ||  data_type: {data_type}")
+                   
+                        else:
+                            log_and_print("No match found")
+                    else:
+                        # Default to nothing if no column size specified
+                        column_size = ''
+                    
+                    # Append column name and data type to their respective lists/dictionaries
+                    header.append(column_name.strip())
+                    data_types.append(data_type.strip())
+                    column_sizes.append(column_size.strip())
+                else:
+                    log_and_print(f"Column Name: {column_name}")
+            
+                    # Default to VARCHAR(255) if no data type specified
+                    header.append(column_name.strip())
+                    data_types.append('VARCHAR')
+                    column_sizes.append('(255)')
+            
     return header, data_types, column_sizes
+
 
 # Function to create a database table
 def create_table(cursor, table_name, header, data_types, column_sizes):
     # Create the table with the inferred data types and sizes
-    columns_sql = ', '.join([f'"{column_name.lower()}" {data_types.get(i, "VARCHAR")}' if data_types.get(i, "VARCHAR") != 'VARCHAR' else
-                            f'"{column_name.lower()}" {data_types.get(i, "VARCHAR")}({column_sizes.get(i, 255)})'
+    columns_sql = ', '.join([f'"{column_name.lower()}" {data_types[i]}{column_sizes[i]}'
                             for i, column_name in enumerate(header)])
     create_table_sql = f"""
     CREATE TABLE IF NOT EXISTS "{table_name}" (
@@ -115,6 +163,7 @@ def create_table(cursor, table_name, header, data_types, column_sizes):
 # Function to insert data into a database table
 def insert_data(cursor, table_name, header, csv_file):
     with open(csv_file, 'r') as csv_file_handle:
+        log_and_print(f"Opening CSV file: {csv_file}")
         csv_reader = csv.reader(csv_file_handle)
         next(csv_reader)  # Skip header row
 

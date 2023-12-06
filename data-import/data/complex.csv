@@ -1,0 +1,4 @@
+name,age,price,registration_date,is_active,unique_id,description,notes
+John Doe,32,499.99,2022-01-15,true,3fa85f64-5717-4562-b3fc-2c963f66afa6,opah,This is a note.
+Jane Smith,28,199.95,2022-02-20,false,a22e375f-7bb0-45c5-a4f0-eb5a1d65520f,sasa,Another note.
+Jack Doe,32,499.99,2022-01-15,true,3fa85f64-5717-4562-b3fc-2c963f66afa6,Blahas,This is a note.

@@ -1,0 +1,8 @@
+name VARCHAR(255)
+age integer
+price numeric(8, 2)
+registration_date date
+is_active boolean
+unique_id uuid
+description varchar(50)
+notes text
