@@ -53,43 +53,49 @@ def infer_data_types_and_sizes(csv_file):
 
         # Initialize column_sizes to have enough elements for all columns
         column_sizes = [f''] * len(header)
-
+        row_count = 0
         # Analyze data to infer data types and estimate column sizes
         for row in reader:
-            for i, cell in enumerate(row):
-                # Check if the cell matches a date pattern
-                if date_pattern.match(cell):
-                    column_data_types[i] = 'DATE'
-                # Check if the cell matches a time pattern
-                elif time_pattern.match(cell):
-                    column_data_types[i] = 'TIME'
-                # Check if the cell matches a timestamp pattern
-                elif timestamp_pattern.match(cell):
-                    column_data_types[i] = 'TIMESTAMP'
-                # Check if the cell matches an integer pattern
-                elif int_pattern.match(cell):
-                    column_data_types[i] = 'INTEGER'
-                # Check if the cell matches a floating-point number pattern
-                elif float_pattern.match(cell):
-                    column_data_types[i] = 'NUMERIC'
-                # Check if the cell matches a boolean pattern
-                elif bool_pattern.match(cell):
-                    column_data_types[i] = 'BOOLEAN'
-                # Check if the cell matches a UUID pattern
-                elif uuid_pattern.match(cell):
-                    column_data_types[i] = 'UUID'
-                # Check if the cell matches a JSON or JSONB pattern
-                elif cell.startswith('{') and cell.endswith('}') or cell.startswith('[') and cell.endswith(']'):
-                    column_data_types[i] = 'JSONB'
-                else:
-                    # Default to VARCHAR if no other match
-                    column_data_types[i] = 'VARCHAR'
+            row_count += 1
+            try:
+                for i, cell in enumerate(row):
+                    # Check if the cell matches a date pattern
+                    if date_pattern.match(cell):
+                        column_data_types[i] = 'DATE'
+                    # Check if the cell matches a time pattern
+                    elif time_pattern.match(cell):
+                        column_data_types[i] = 'TIME'
+                    # Check if the cell matches a timestamp pattern
+                    elif timestamp_pattern.match(cell):
+                        column_data_types[i] = 'TIMESTAMP'
+                    # Check if the cell matches an integer pattern
+                    elif int_pattern.match(cell):
+                        column_data_types[i] = 'INTEGER'
+                    # Check if the cell matches a floating-point number pattern
+                    elif float_pattern.match(cell):
+                        column_data_types[i] = 'NUMERIC'
+                    # Check if the cell matches a boolean pattern
+                    elif bool_pattern.match(cell):
+                        column_data_types[i] = 'BOOLEAN'
+                    # Check if the cell matches a UUID pattern
+                    elif uuid_pattern.match(cell):
+                        column_data_types[i] = 'UUID'
+                    # Check if the cell matches a JSON or JSONB pattern
+                    elif cell.startswith('{') and cell.endswith('}') or cell.startswith('[') and cell.endswith(']'):
+                        column_data_types[i] = 'JSONB'
+                    else:
+                        # Default to VARCHAR if no other match
+                        column_data_types[i] = 'VARCHAR'
 
-                # Track max VARCHAR length for VARCHAR columns
-                if column_data_types[i] == 'VARCHAR':
-                    max_length = len(cell)
-                    if max_length > int(column_sizes[i].strip('()') or '255'):
-                        column_sizes[i] = f'({max_length})'
+                    # Track max VARCHAR length for VARCHAR columns
+                    if column_data_types[i] == 'VARCHAR':
+                        max_length = len(cell)
+                        if max_length > int(column_sizes[i].strip('()') or '255'):
+                            column_sizes[i] = f'({max_length})'
+            except Exception as e:
+                error_message = f"Error processing row ${row_count}: {e}\n{traceback.format_exc()}"
+                logging.error(error_message)
+                print(error_message)
 
         return header, column_data_types, column_sizes
 
@@ -161,7 +167,8 @@ def create_table(cursor, table_name, header, data_types, column_sizes):
     log_and_print(f"Schema created for table {table_name}: {create_table_sql}")
 
 # Function to insert data into a database table
-def insert_data(cursor, table_name, header, csv_file):
+# Function to insert data into a database table
+def insert_data(conn, cursor, table_name, header, csv_file, commit_every=50):
     with open(csv_file, 'r') as csv_file_handle:
         log_and_print(f"Opening CSV file: {csv_file}")
         csv_reader = csv.reader(csv_file_handle)
@@ -169,14 +176,25 @@ def insert_data(cursor, table_name, header, csv_file):
 
         # Construct the INSERT statement with lowercase column names
         insert_sql = f'INSERT INTO "{table_name}" ({", ".join(header).lower()}) VALUES ({", ".join(["%s"] * len(header))})'
-       
+
         # Insert data into the table, logging errors
+        row_count = 0
         for row in csv_reader:
+            row_count += 1
             try:
                 cursor.execute(insert_sql, row)
-                log_and_print(f"Data inserted into table {table_name}: {row}")
+                # log_and_print(f"Data inserted into table {table_name}: {row}")
             except Exception as e:
                 logging.error(f"Error inserting row {row} into {table_name}: {e}")
+
+            # Commit every 'commit_every' rows
+            if row_count % commit_every == 0:
+                conn.commit()
+
+        # Commit any remaining rows
+        conn.commit()
+
+        log_and_print(f"Inserted {row_count} rows in {table_name}")
 
 # Database connection parameters
 db_params = {
@@ -221,8 +239,8 @@ for root, dirs, files in os.walk('data'):
                     header, data_types, column_sizes = infer_data_types_and_sizes(csv_file)
 
                 create_table(cursor, table_name, header, data_types, column_sizes)
-
-                insert_data(cursor, table_name, header, csv_file)
+                conn.commit()
+                insert_data(conn, cursor, table_name, header, csv_file)
 
                 conn.commit()
                 log_and_print(f"Data inserted into table {table_name} successfully.")
