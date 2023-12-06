@@ -1,0 +1,6 @@
+FirstName,Email,Phone,DOB,Age,Salary,Active,Membership,Address,City
+Alice,alice@example.com,123-456-7890,1990-05-15,32,50000,true,Gold,123 Main St,New York
+Bob,bob@example.com,987-654-3210,1985-08-20,37,60000,true,Silver,456 Elm St,Los Angeles
+Charlie,charlie@example.com,555-123-7890,1993-02-10,29,55000,false,Gold,789 Oak St,Chicago
+David,david@example.com,333-888-1111,1978-11-05,44,70000,true,Bronze,101 Pine St,San Francisco
+Eve,eve@example.com,777-222-9999,1982-07-25,40,65000,false,Silver,202 Maple St,Boston

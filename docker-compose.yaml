@@ -1,0 +1,27 @@
+version: '3'
+services:
+  postgres:
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/docker-entrypoint-initdb.d
+    environment:
+      POSTGRES_USER: myuser
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_DB: mydb
+  csv-importer:
+    build:
+      context: ./data-import
+      dockerfile: Dockerfile
+    volumes:
+      - csv-importer-data:/app
+    depends_on:
+      - postgres
+    command: python import_csv.py
+
+volumes:
+  postgres-data:
+  csv-importer-data:
