@@ -15,13 +15,13 @@ To get this project up and running on your local machine, follow these steps:
 1. Clone the repository:
 
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/mikedelafuente/csv2postgres.git
    ```
 
 2. Navigate to the project directory:
 
    ```bash
-   cd csv-to-postgresql-importer
+   cd csv2postgres
    ```
 
 3. Build and run the Docker containers:
