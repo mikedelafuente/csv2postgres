@@ -1,6 +1,6 @@
-# Project Name
+# CSV to PostgreSQL Importer
 
-Brief project description here.
+This project is a CSV to PostgreSQL data importer that allows you to easily import CSV files into a PostgreSQL database using Docker containers.
 
 ## Prerequisites
 
@@ -21,13 +21,13 @@ To get this project up and running on your local machine, follow these steps:
 2. Navigate to the project directory:
 
    ```bash
-   cd my_project
+   cd csv-to-postgresql-importer
    ```
 
 3. Build and run the Docker containers:
 
    ```bash
-   docker-compose up --build
+   ./setup_environment.sh
    ```
 
    This command will build the Docker images and start the PostgreSQL database and the CSV importer container.
@@ -40,14 +40,22 @@ To get this project up and running on your local machine, follow these steps:
 
 ## Usage
 
-Describe how to use or interact with the project. Include any relevant information for users or developers.
+To use the CSV to PostgreSQL importer, follow these steps:
+
+1. Place your CSV files in the `data` directory.
+
+2. Run the Docker containers as described in the "Getting Started" section.
+
+3. Wait for the CSV data to be imported into the PostgreSQL database.
+
+4. Access your PostgreSQL database to query and analyze the imported data.
 
 ## Cleanup
 
 To stop and remove the Docker containers and clean up resources, run the following command:
 
 ```bash
-docker-compose down
+./setup_environment.sh down
 ```
 
 ## Contributing
