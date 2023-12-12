@@ -66,6 +66,7 @@ def infer_data_types_and_sizes(csv_file):
         # Analyze data to infer data types and estimate column sizes
         for row in reader:
             row_count += 1
+        
             try:
                 for i, cell in enumerate(row):
                     # Check if the cell matches a date pattern
@@ -116,7 +117,6 @@ def infer_data_types_and_sizes(csv_file):
 
         return header, column_data_types, column_sizes
 
-# Function to read table definitions from schema files
 # Function to read table definitions from schema files
 def read_table_definition(schema_file):
     header = []            # To store column names
@@ -215,7 +215,6 @@ def drop_table(table_name):
         conn.close()
 
 # Function to insert data into a database table
-# Function to insert data into a database table
 def insert_data(table_name, header, csv_file, commit_every=50):
     row_count = 0
     conn = None
@@ -289,28 +288,39 @@ if not wait_for_postgres(**db_params):
 log_and_print("PostgreSQL server is ready. Proceeding with data insertion.")
 
 # Iterate through all CSV files in the 'data' folder
-for root, dirs, files in os.walk('data'):
-    for file in files:
-        if file.endswith('.csv'):
-            csv_file = os.path.join(root, file)
-            table_name = os.path.splitext(file)[0]  # Extract table name from file name (excluding extension)
-            schema_file = os.path.join(root, f"{table_name}.schema")  # Path to corresponding schema file
+# walk through both the sample data folder and the data folder
+folders = ['data', 'sample_data']
 
-            try:
-                drop_table(table_name)
-                # Drop the table if it exists
-               
-                if os.path.exists(schema_file):
-                    header, data_types, column_sizes = read_table_definition(schema_file)
-                else:
-                    header, data_types, column_sizes = infer_data_types_and_sizes(csv_file)
+for folder in folders:
+    log_and_print(f"Processing folder: {folder}")
 
-                create_table(table_name, header, data_types, column_sizes)
-                insert_data(table_name, header, csv_file)
+    # Do not error out if the folder does not exist
+    if not os.path.exists(folder):
+        log_and_print(f"Folder {folder} does not exist.")
+        continue
+    
+    for root, dirs, files in os.walk(folder):
+        for file in files:
+            if file.endswith('.csv'):
+                csv_file = os.path.join(root, file)
+                table_name = os.path.splitext(file)[0]  # Extract table name from file name (excluding extension)
+                schema_file = os.path.join(root, f"{table_name}.schema")  # Path to corresponding schema file
+
+                try:
+                    drop_table(table_name)
+                    # Drop the table if it exists
                 
-                log_and_print(f"Data inserted into table {table_name} successfully.")
-            except Exception as e:
-                error_message = f"Error processing {csv_file}: {e}\n{traceback.format_exc()}"
-                logging.error(error_message)
-                print(error_message)
+                    if os.path.exists(schema_file):
+                        header, data_types, column_sizes = read_table_definition(schema_file)
+                    else:
+                        header, data_types, column_sizes = infer_data_types_and_sizes(csv_file)
+
+                    create_table(table_name, header, data_types, column_sizes)
+                    insert_data(table_name, header, csv_file)
+                    
+                    log_and_print(f"Data inserted into table {table_name} successfully.")
+                except Exception as e:
+                    error_message = f"Error processing {csv_file}: {e}\n{traceback.format_exc()}"
+                    logging.error(error_message)
+                    print(error_message)
       

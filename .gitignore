@@ -1,3 +1,6 @@
 .DS_Store
 data-import/data/lfbar.csv
 data-import/data/paperstatement.csv
+# ignore the data-import/data/ folder except for put_your_csv_files_here.md
+data-import/data/*
+!data-import/data/put_your_csv_files_here.md
