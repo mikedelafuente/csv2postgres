@@ -7,6 +7,15 @@ import sys
 import logging
 import traceback
 
+# Database connection parameters
+db_params = {
+    'dbname': 'mydb',
+    'user': 'myuser',
+    'password': 'mypassword',
+    'host': 'postgres',
+    'port': '5432',
+}
+
 def log_and_print(message):
     print(message)
     logging.info(message)
@@ -43,8 +52,8 @@ def infer_data_types_and_sizes(csv_file):
         date_pattern = re.compile(r'^\d{4}-\d{2}-\d{2}$')
         time_pattern = re.compile(r'^\d{2}:\d{2}:\d{2}$')
         timestamp_pattern = re.compile(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$')
-        int_pattern = re.compile(r'^-?\d+$')
-        float_pattern = re.compile(r'^-?\d+\.\d+$')
+        int_pattern = re.compile(r'^0$|^-?[1-9]\d*$')  # re.compile(r'^-?\d+$')
+        float_pattern = re.compile(r'^0\.\d+$|^-?[1-9]\d*\.\d+$') #re.compile(r'^-?\d+\.\d+$')
         bool_pattern = re.compile(r'^(true|false)$', re.IGNORECASE)
         uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE)
 
@@ -70,10 +79,18 @@ def infer_data_types_and_sizes(csv_file):
                         column_data_types[i] = 'TIMESTAMP'
                     # Check if the cell matches an integer pattern
                     elif int_pattern.match(cell):
-                        column_data_types[i] = 'INTEGER'
+                        if i not in column_data_types:
+                            column_data_types[i] = 'INTEGER'
+                        # For subsequent rows, check if the type remains INTEGER
+                        elif column_data_types[i] != 'INTEGER':
+                            column_data_types[i] = 'VARCHAR'
                     # Check if the cell matches a floating-point number pattern
                     elif float_pattern.match(cell):
-                        column_data_types[i] = 'NUMERIC'
+                        if i not in column_data_types:
+                            column_data_types[i] = 'NUMERIC'
+                        # For subsequent rows, check if the type remains NUMERIC
+                        elif column_data_types[i] != 'NUMERIC':
+                            column_data_types[i] = 'VARCHAR'
                     # Check if the cell matches a boolean pattern
                     elif bool_pattern.match(cell):
                         column_data_types[i] = 'BOOLEAN'
@@ -154,7 +171,7 @@ def read_table_definition(schema_file):
 
 
 # Function to create a database table
-def create_table(cursor, table_name, header, data_types, column_sizes):
+def create_table(table_name, header, data_types, column_sizes):
     # Create the table with the inferred data types and sizes
     columns_sql = ', '.join([f'"{column_name.lower()}" {data_types[i]}{column_sizes[i]}'
                             for i, column_name in enumerate(header)])
@@ -163,47 +180,101 @@ def create_table(cursor, table_name, header, data_types, column_sizes):
         {columns_sql}
     );
     """
-    cursor.execute(create_table_sql)
+    
+    try:
+        conn = psycopg2.connect(**db_params)
+        cursor = conn.cursor()
+
+        cursor.execute(create_table_sql)
+        conn.commit()
+            
+    # Commit every 'commit_every' rows
+    except Exception as e:
+        logging.error(f"Error inserting row {row} into {table_name}: {e}")
+        cursor.rollback()
+    finally:
+        cursor.close()
+        conn.close()
+
     log_and_print(f"Schema created for table {table_name}: {create_table_sql}")
 
+def drop_table(table_name):
+    try:
+        conn = psycopg2.connect(**db_params)
+        cursor = conn.cursor()
+        # Drop the table if it exists
+        drop_table_sql = f'DROP TABLE IF EXISTS "{table_name}"'
+        cursor.execute(drop_table_sql)
+
+    except Exception as e:
+        error_message = f"Error dropping table {table_name}: {e}\n{traceback.format_exc()}"
+        logging.error(error_message)
+        print(error_message)
+    finally:
+        cursor.close()
+        conn.close()
+
 # Function to insert data into a database table
 # Function to insert data into a database table
-def insert_data(conn, cursor, table_name, header, csv_file, commit_every=50):
-    with open(csv_file, 'r') as csv_file_handle:
-        log_and_print(f"Opening CSV file: {csv_file}")
-        csv_reader = csv.reader(csv_file_handle)
-        next(csv_reader)  # Skip header row
+def insert_data(table_name, header, csv_file, commit_every=50):
+    row_count = 0
+    conn = None
+    cursor = None
+    commit_count = 0
+    has_inserts = False
 
-        # Construct the INSERT statement with lowercase column names
-        insert_sql = f'INSERT INTO "{table_name}" ({", ".join(header).lower()}) VALUES ({", ".join(["%s"] * len(header))})'
+    try:
+      
+        with open(csv_file, 'r') as csv_file_handle:
+            log_and_print(f"Opening CSV file: {csv_file}")
+            csv_reader = csv.reader(csv_file_handle)
+            next(csv_reader)  # Skip header row
 
-        # Insert data into the table, logging errors
-        row_count = 0
-        for row in csv_reader:
-            row_count += 1
-            try:
-                cursor.execute(insert_sql, row)
-                # log_and_print(f"Data inserted into table {table_name}: {row}")
-            except Exception as e:
-                logging.error(f"Error inserting row {row} into {table_name}: {e}")
+            for row in csv_reader:
+                row_count += 1
+                try:
+                    if conn is None:
+                        conn = psycopg2.connect(**db_params)
+                    
+                    if cursor is None:
+                        cursor = conn.cursor()
 
-            # Commit every 'commit_every' rows
-            if row_count % commit_every == 0:
-                conn.commit()
+                    # Construct the INSERT statement with lowercase column names
+                    insert_sql = f'INSERT INTO "{table_name}" ({", ".join(header).lower()}) VALUES ({", ".join(["%s"] * len(header))})'
+                    has_inserts = True
+                    cursor.execute(insert_sql, row)
 
-        # Commit any remaining rows
-        conn.commit()
+                    if row_count % commit_every == 0:
+                        if cursor:
+                            cursor.close()
+                            cursor = None
+                        if conn:
+                            conn.commit()
+                            conn.close()
+                            conn = None
+                            commit_count += 1
+                            has_inserts = False
 
-        log_and_print(f"Inserted {row_count} rows in {table_name}")
+                except Exception as e:
+                    logging.error(f"Error inserting row {row_count} into {table_name}: {e}")
+                    if conn:
+                        conn.rollback()
 
-# Database connection parameters
-db_params = {
-    'dbname': 'mydb',
-    'user': 'myuser',
-    'password': 'mypassword',
-    'host': 'postgres',
-    'port': '5432',
-}
+    except Exception as e:
+        logging.error(f"Error creating a connection: {e}")
+
+    finally:
+        if cursor:
+            cursor.close()
+        if conn:
+            conn.commit()
+            conn.close()
+            if has_inserts == True:
+                commit_count += 1
+
+    log_and_print(f"Inserted {row_count} rows in {table_name} using {commit_count} commits")
+
+
 
 # Set up logging
 logging.basicConfig(filename='import_log.log', level=logging.INFO)
@@ -226,28 +297,20 @@ for root, dirs, files in os.walk('data'):
             schema_file = os.path.join(root, f"{table_name}.schema")  # Path to corresponding schema file
 
             try:
-                conn = psycopg2.connect(**db_params)
-                cursor = conn.cursor()
-
+                drop_table(table_name)
                 # Drop the table if it exists
-                drop_table_sql = f'DROP TABLE IF EXISTS "{table_name}"'
-                cursor.execute(drop_table_sql)
-
+               
                 if os.path.exists(schema_file):
                     header, data_types, column_sizes = read_table_definition(schema_file)
                 else:
                     header, data_types, column_sizes = infer_data_types_and_sizes(csv_file)
 
-                create_table(cursor, table_name, header, data_types, column_sizes)
-                conn.commit()
-                insert_data(conn, cursor, table_name, header, csv_file)
-
-                conn.commit()
+                create_table(table_name, header, data_types, column_sizes)
+                insert_data(table_name, header, csv_file)
+                
                 log_and_print(f"Data inserted into table {table_name} successfully.")
             except Exception as e:
                 error_message = f"Error processing {csv_file}: {e}\n{traceback.format_exc()}"
                 logging.error(error_message)
                 print(error_message)
-            finally:
-                cursor.close()
-                conn.close()
+      
