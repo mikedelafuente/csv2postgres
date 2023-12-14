@@ -1,179 +1,12 @@
 import os
-import psycopg2
 import csv
 import re
 import time
 import sys
 import logging
 import traceback
-
-# Database connection parameters - this should match what docker-compose.yaml is set up to use
-db_params = {
-    'dbname': 'mydb',
-    'user': 'myuser',
-    'password': 'mypassword',
-    'host': 'postgres',
-    'port': '5432',
-}
-
-def print_error(message):
-    print(f"\033[91m{message}\033[0m")
-
-def log_error(message):
-    seperator = "x"
-    line = ""
-    for i in range(80):
-        line += seperator
-
-    print_error(line)
-    print_error(f"ERROR: {message}")
-    print_error(line)
-
-    logging.error(f"{message}")
-   
-# Function to log and print messages
-def log_info(message):
-    print(message)
-    logging.info(message)
-
-def log_and_print_separator(seperator="-"):
-    line = ""
-    for i in range(80):
-        line += seperator
-        
-    log_info(line)
-
-def log_and_print_execution_time(start_time, end_time, message="Execution time"):
-    execution_time = end_time - start_time
-
-    # Format the execution time as hh:mm:ss:mmmm
-    hours, remainder = divmod(execution_time, 3600)
-    minutes, remainder = divmod(remainder, 60)
-    seconds, milliseconds = divmod(remainder, 1)
-
-    formatted_time = f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}:{int(milliseconds * 1000):04}"
-    log_info(f"{message}: {formatted_time}")
-
-# Function to wait for PostgreSQL server to become available
-def wait_for_postgres(host, port, user, password, dbname, max_attempts=30, delay_seconds=2):
-    for attempt in range(1, max_attempts + 1):
-        try:
-            conn = psycopg2.connect(
-                dbname=dbname,
-                user=user,
-                password=password,
-                host=host,
-                port=port
-            )
-            conn.close()
-            return True
-        except psycopg2.OperationalError:
-            log_info(f"Attempt {attempt} of {max_attempts}: PostgreSQL server not available. Waiting...")
-            time.sleep(delay_seconds)        
-    return False
-
-# Function to create a database table
-def create_table(table_name, header, data_types, column_sizes):
-    # Create the table with the inferred data types and sizes
-    columns_sql = ', '.join([f'"{column_name.lower()}" {data_types[i]}{column_sizes[i]}'
-                            for i, column_name in enumerate(header)])
-    create_table_sql = f"""
-    CREATE TABLE IF NOT EXISTS "{table_name}" (
-        {columns_sql}
-    );
-    """
-    
-    try:
-        conn = psycopg2.connect(**db_params)
-        cursor = conn.cursor()
-
-        cursor.execute(create_table_sql)
-        conn.commit()
-            
-    except Exception as e:
-        log_error(f"Error creating table {table_name}: {e}")
-        cursor.rollback()
-    finally:
-        cursor.close()
-        conn.close()
-
-    log_info(f"Schema created for table {table_name}: {create_table_sql}")
-
-# Function to drop a database table by name
-def drop_table(table_name):
-    try:
-        conn = psycopg2.connect(**db_params)
-        cursor = conn.cursor()
-        # Drop the table if it exists
-        drop_table_sql = f'DROP TABLE IF EXISTS "{table_name}"'
-        cursor.execute(drop_table_sql)
-
-    except Exception as e:
-        log_error(f"Error dropping table {table_name}: {e}\n{traceback.format_exc()}")
-    finally:
-        cursor.close()
-        conn.close()
-
-# Function to insert data into a database table
-def insert_data(table_name, header, csv_file, commit_every=50):
-    row_count = 0
-    conn = None
-    cursor = None
-    commit_count = 0
-    has_inserts = False
-
-    try:
-        start_time = time.time()
-        with open(csv_file, 'r') as csv_file_handle:
-            log_info(f"Opening CSV file: {csv_file}")
-            csv_reader = csv.reader(csv_file_handle)
-            next(csv_reader)  # Skip header row
-
-            for row in csv_reader:
-                row_count += 1
-                try:
-                    if conn is None:
-                        conn = psycopg2.connect(**db_params)
-                    
-                    if cursor is None:
-                        cursor = conn.cursor()
-
-                    # Construct the INSERT statement with lowercase column names
-                    insert_sql = f'INSERT INTO "{table_name}" ({", ".join(header).lower()}) VALUES ({", ".join(["%s"] * len(header))})'
-                    has_inserts = True
-                    cursor.execute(insert_sql, row)
-
-                    if row_count % commit_every == 0:
-                        if cursor:
-                            cursor.close()
-                            cursor = None
-                        if conn:
-                            conn.commit()
-                            conn.close()
-                            conn = None
-                            commit_count += 1
-                            has_inserts = False
-
-                except Exception as e:
-                    log_error(f"Error inserting row {row_count} into {table_name}: {e}")
-                    if conn:
-                        conn.rollback()
-
-    except Exception as e:
-        log_error(f"Error creating a connection: {e}")
-
-    finally:
-        if cursor:
-            cursor.close()
-        if conn:
-            conn.commit()
-            conn.close()
-            if has_inserts == True:
-                commit_count += 1
-
-    end_time = time.time()
-    log_and_print_execution_time(start_time, end_time, f"Insertion time for table {table_name}")
-    log_info(f"Inserted {row_count} rows in {table_name} using {commit_count} commits")
+from database import wait_for_postgres, create_table, insert_data, drop_table, DB_PARAMS
+from logger import log_error, log_info, log_separator, log_execution_time
 
 # Function to infer data types and estimate column sizes
 def infer_data_types_and_sizes(csv_file):
@@ -321,7 +154,7 @@ def create_schema_file(csv_file, schema_file):
 # Parses subfolders of this directory looking for CSV files, it is not a recursive search
 def parse_folders(folders):
     for folder in folders:
-        log_and_print_separator("+")
+        log_separator("+")
         log_info(f"Processing folder: {folder}")
 
         # Do not error out if the folder does not exist
@@ -336,7 +169,7 @@ def parse_folders(folders):
 def parse_folder_files(folder):
     for root, dirs, files in os.walk(folder):
         for file in files:
-            log_and_print_separator()
+            log_separator()
             # check lowercase file extension
             # if the file is not a CSV file, skip it
             if not file.lower().endswith('.csv'):
@@ -375,7 +208,7 @@ def main():
     start_time = time.time()
 
     # Wait for PostgreSQL server to start
-    if not wait_for_postgres(**db_params):
+    if not wait_for_postgres(**DB_PARAMS):
         log_info("Error: Unable to connect to PostgreSQL server.")
         sys.exit(1)
 
@@ -390,9 +223,9 @@ def main():
 
     parse_folders(folders)
 
-    log_and_print_separator("*")
+    log_separator("*")
     end_time = time.time()
-    log_and_print_execution_time(start_time, end_time, "Main execution time")
+    log_execution_time(start_time, end_time, "Main execution time")
     
     log_info("Import CSV script completed. Ready for queries.")
 
