@@ -16,8 +16,23 @@ db_params = {
     'port': '5432',
 }
 
+def print_error(message):
+    print(f"\033[91m{message}\033[0m")
+
+def log_error(message):
+    seperator = "x"
+    line = ""
+    for i in range(80):
+        line += seperator
+
+    print_error(line)
+    print_error(f"ERROR: {message}")
+    print_error(line)
+
+    logging.error(f"{message}")
+   
 # Function to log and print messages
-def log_and_print(message):
+def log_info(message):
     print(message)
     logging.info(message)
 
@@ -26,7 +41,7 @@ def log_and_print_separator(seperator="-"):
     for i in range(80):
         line += seperator
         
-    log_and_print(line)
+    log_info(line)
 
 def log_and_print_execution_time(start_time, end_time, message="Execution time"):
     execution_time = end_time - start_time
@@ -37,7 +52,7 @@ def log_and_print_execution_time(start_time, end_time, message="Execution time")
     seconds, milliseconds = divmod(remainder, 1)
 
     formatted_time = f"{int(hours):02}:{int(minutes):02}:{int(seconds):02}:{int(milliseconds * 1000):04}"
-    log_and_print(f"{message}: {formatted_time}")
+    log_info(f"{message}: {formatted_time}")
 
 # Function to wait for PostgreSQL server to become available
 def wait_for_postgres(host, port, user, password, dbname, max_attempts=30, delay_seconds=2):
@@ -53,7 +68,8 @@ def wait_for_postgres(host, port, user, password, dbname, max_attempts=30, delay
             conn.close()
             return True
         except psycopg2.OperationalError:
-            time.sleep(delay_seconds)
+            log_info(f"Attempt {attempt} of {max_attempts}: PostgreSQL server not available. Waiting...")
+            time.sleep(delay_seconds)        
     return False
 
 # Function to create a database table
@@ -75,13 +91,13 @@ def create_table(table_name, header, data_types, column_sizes):
         conn.commit()
             
     except Exception as e:
-        logging.error(f"Error creating table {table_name}: {e}")
+        log_error(f"Error creating table {table_name}: {e}")
         cursor.rollback()
     finally:
         cursor.close()
         conn.close()
 
-    log_and_print(f"Schema created for table {table_name}: {create_table_sql}")
+    log_info(f"Schema created for table {table_name}: {create_table_sql}")
 
 # Function to drop a database table by name
 def drop_table(table_name):
@@ -93,9 +109,7 @@ def drop_table(table_name):
         cursor.execute(drop_table_sql)
 
     except Exception as e:
-        error_message = f"Error dropping table {table_name}: {e}\n{traceback.format_exc()}"
-        logging.error(error_message)
-        print(error_message)
+        log_error(f"Error dropping table {table_name}: {e}\n{traceback.format_exc()}")
     finally:
         cursor.close()
         conn.close()
@@ -111,7 +125,7 @@ def insert_data(table_name, header, csv_file, commit_every=50):
     try:
         start_time = time.time()
         with open(csv_file, 'r') as csv_file_handle:
-            log_and_print(f"Opening CSV file: {csv_file}")
+            log_info(f"Opening CSV file: {csv_file}")
             csv_reader = csv.reader(csv_file_handle)
             next(csv_reader)  # Skip header row
 
@@ -141,12 +155,12 @@ def insert_data(table_name, header, csv_file, commit_every=50):
                             has_inserts = False
 
                 except Exception as e:
-                    logging.error(f"Error inserting row {row_count} into {table_name}: {e}")
+                    log_error(f"Error inserting row {row_count} into {table_name}: {e}")
                     if conn:
                         conn.rollback()
 
     except Exception as e:
-        logging.error(f"Error creating a connection: {e}")
+        log_error(f"Error creating a connection: {e}")
 
     finally:
         if cursor:
@@ -159,7 +173,7 @@ def insert_data(table_name, header, csv_file, commit_every=50):
 
     end_time = time.time()
     log_and_print_execution_time(start_time, end_time, f"Insertion time for table {table_name}")
-    log_and_print(f"Inserted {row_count} rows in {table_name} using {commit_count} commits")
+    log_info(f"Inserted {row_count} rows in {table_name} using {commit_count} commits")
 
 # Function to infer data types and estimate column sizes
 def infer_data_types_and_sizes(csv_file):
@@ -232,9 +246,7 @@ def infer_data_types_and_sizes(csv_file):
                         if max_length > int(column_sizes[i].strip('()') or '255'):
                             column_sizes[i] = f'({max_length})'
             except Exception as e:
-                error_message = f"Error processing row {row_count}: {e}\n{traceback.format_exc()}"
-                logging.error(error_message)
-                print(error_message)
+                log_error("Error processing row {row_count}: {e}\n{traceback.format_exc()}")                
 
         return header, column_data_types, column_sizes
 
@@ -256,7 +268,7 @@ def read_table_definition(schema_file):
                 if len(parts) > 1:
                     # Extract data type
                     data_type = ' '.join(parts[1:])  # Combine all parts from parts[1] and beyond
-                    log_and_print(f"Column Name: {column_name} || Data Type: {data_type}")
+                    log_info(f"Column Name: {column_name} || Data Type: {data_type}")
              
                     column_size = ''
                     # Check if a column size is specified
@@ -268,10 +280,10 @@ def read_table_definition(schema_file):
                             # Remove the size part from data_type
                             data_type = data_type[:start_index]
 
-                            log_and_print(f"Matched: col_size: {column_size} ||  data_type: {data_type}")
+                            log_info(f"Matched: col_size: {column_size} ||  data_type: {data_type}")
                    
                         else:
-                            log_and_print("No match found")
+                            log_info("No match found")
                     else:
                         # Default to nothing if no column size specified
                         column_size = ''
@@ -281,7 +293,7 @@ def read_table_definition(schema_file):
                     data_types.append(data_type.strip())
                     column_sizes.append(column_size.strip())
                 else:
-                    log_and_print(f"Column Name: {column_name}")
+                    log_info(f"Column Name: {column_name}")
             
                     # Default to VARCHAR(255) if no data type specified
                     header.append(column_name.strip())
@@ -300,21 +312,21 @@ def create_schema_file(csv_file, schema_file):
         for i, column_name in enumerate(header):
             schema_file_handle.write(f'{column_name} {data_types[i]}{column_sizes[i]}\n')
 
-    log_and_print(f"Schema file created: {schema_file}")
+    log_info(f"Schema file created: {schema_file}")
     
     # Log the contents of the schema file
     with open(schema_file, 'r') as schema_file_handle:
-        log_and_print(f"Schema file contents: {schema_file_handle.read()}")
+        log_info(f"Schema file contents: {schema_file_handle.read()}")
 
 # Parses subfolders of this directory looking for CSV files, it is not a recursive search
 def parse_folders(folders):
     for folder in folders:
         log_and_print_separator("+")
-        log_and_print(f"Processing folder: {folder}")
+        log_info(f"Processing folder: {folder}")
 
         # Do not error out if the folder does not exist
         if not os.path.exists(folder):
-            log_and_print(f"Folder {folder} does not exist.")
+            log_info(f"Folder {folder} does not exist.")
             # Skip to the next folder
             continue
         
@@ -328,17 +340,17 @@ def parse_folder_files(folder):
             # check lowercase file extension
             # if the file is not a CSV file, skip it
             if not file.lower().endswith('.csv'):
-                log_and_print(f"Skipping file {file} because it is not a CSV file.")
+                log_info(f"Skipping file {file} because it is not a CSV file.")
                 continue
 
-            log_and_print(f"Processing file: {file}")
+            log_info(f"Processing file: {file}")
             csv_file = os.path.join(root, file)
             table_name = os.path.splitext(file)[0]  # Extract table name from file name (excluding extension)
             schema_file = os.path.join(root, f"{table_name}.schema")  # Path to corresponding schema file
 
             try:
                 drop_table(table_name)  # Drop the table if it exists
-                log_and_print(f"Checking for schema file: {schema_file}")
+                log_info(f"Checking for schema file: {schema_file}")
                 if not os.path.exists(schema_file):
                     create_schema_file(csv_file, schema_file)
                     
@@ -348,29 +360,26 @@ def parse_folder_files(folder):
                 create_table(table_name, header, data_types, column_sizes)
                 insert_data(table_name, header, csv_file)
                 
-                log_and_print(f"Data inserted into table {table_name} successfully.")
+                log_info(f"Data inserted into table {table_name} successfully.")
             except Exception as e:
-                error_message = f"Error processing {csv_file}: {e}\n{traceback.format_exc()}"
-                logging.error(error_message)
-                print(error_message)
-
+                log_error(f"Error processing {csv_file}: {e}\n{traceback.format_exc()}")                
 
 # Main entry point      
 def main():
     # Set up logging
     logging.basicConfig(filename='import_log.log', level=logging.INFO)
 
-    log_and_print("Starting Import CSV script")
+    log_info("Starting Import CSV script")
 
     # Start the timer
     start_time = time.time()
 
     # Wait for PostgreSQL server to start
     if not wait_for_postgres(**db_params):
-        log_and_print("Error: Unable to connect to PostgreSQL server.")
+        log_info("Error: Unable to connect to PostgreSQL server.")
         sys.exit(1)
 
-    log_and_print("PostgreSQL server is ready. Proceeding with data insertion.")
+    log_info("PostgreSQL server is ready. Proceeding with data insertion.")
 
     # Iterate through all CSV files in the 'data' folder
     # Walk through both the sample data folder and the data folder
@@ -385,7 +394,7 @@ def main():
     end_time = time.time()
     log_and_print_execution_time(start_time, end_time, "Main execution time")
     
-    log_and_print("Import CSV script completed. Ready for queries.")
+    log_info("Import CSV script completed. Ready for queries.")
 
 # Run the main function
 if __name__ == "__main__":
