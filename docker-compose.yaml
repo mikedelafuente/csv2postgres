@@ -20,7 +20,7 @@ services:
       - csv-importer-data:/app
     depends_on:
       - postgres
-    command: python import_csv.py
+    command: ["sh", "-c", "python import_csv.py && sleep infinity"]
 
 volumes:
   postgres-data:

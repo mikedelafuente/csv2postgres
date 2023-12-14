@@ -7,7 +7,7 @@ import sys
 import logging
 import traceback
 
-# Database connection parameters
+# Database connection parameters - this should match what docker-compose.yaml is setup to use
 db_params = {
     'dbname': 'mydb',
     'user': 'myuser',
@@ -16,6 +16,7 @@ db_params = {
     'port': '5432',
 }
 
+# Function to log and print messages
 def log_and_print(message):
     print(message)
     logging.info(message)
@@ -169,7 +170,6 @@ def read_table_definition(schema_file):
             
     return header, data_types, column_sizes
 
-
 # Function to create a database table
 def create_table(table_name, header, data_types, column_sizes):
     # Create the table with the inferred data types and sizes
@@ -198,6 +198,7 @@ def create_table(table_name, header, data_types, column_sizes):
 
     log_and_print(f"Schema created for table {table_name}: {create_table_sql}")
 
+# Function to drop a database table by name
 def drop_table(table_name):
     try:
         conn = psycopg2.connect(**db_params)
@@ -273,32 +274,37 @@ def insert_data(table_name, header, csv_file, commit_every=50):
 
     log_and_print(f"Inserted {row_count} rows in {table_name} using {commit_count} commits")
 
+def create_schema_file(csv_file, schema_file): 
+    # Infer data types and sizes
+    header, data_types, column_sizes = infer_data_types_and_sizes(csv_file)
 
+    # Write the header and data types to a schema file
+    with open(schema_file, 'w') as schema_file_handle:
+        for i, column_name in enumerate(header):
+            schema_file_handle.write(f'{column_name} {data_types[i]}{column_sizes[i]}\n')
 
-# Set up logging
-logging.basicConfig(filename='import_log.log', level=logging.INFO)
-
-log_and_print("Starting Import CSV script")
-
-# Wait for PostgreSQL server to start
-if not wait_for_postgres(**db_params):
-    log_and_print("Error: Unable to connect to PostgreSQL server.")
-    sys.exit(1)
-
-log_and_print("PostgreSQL server is ready. Proceeding with data insertion.")
-
-# Iterate through all CSV files in the 'data' folder
-# walk through both the sample data folder and the data folder
-folders = ['data', 'sample_data']
-
-for folder in folders:
-    log_and_print(f"Processing folder: {folder}")
-
-    # Do not error out if the folder does not exist
-    if not os.path.exists(folder):
-        log_and_print(f"Folder {folder} does not exist.")
-        continue
+    log_and_print(f"Schema file created: {schema_file}")
     
+    #log the contents of the schema file
+    with open(schema_file, 'r') as schema_file_handle:
+        log_and_print(f"Schema file contents: {schema_file_handle.read()}")
+
+
+# Parses sub folders of this directory looking for CSV files, it is not a recursive search
+def parse_folders(folders):    
+    for folder in folders:
+        log_and_print(f"Processing folder: {folder}")
+
+        # Do not error out if the folder does not exist
+        if not os.path.exists(folder):
+            log_and_print(f"Folder {folder} does not exist.")
+            # Skip to the next folder
+            continue
+        
+        parse_folder_files(folder)
+
+# Parses the files within a given folder        
+def parse_folder_files(folder):        
     for root, dirs, files in os.walk(folder):
         for file in files:
             if file.endswith('.csv'):
@@ -310,10 +316,12 @@ for folder in folders:
                     drop_table(table_name)
                     # Drop the table if it exists
                 
+                    log_and_print(f"Checking for schema file: {schema_file}")
+                    if os.path.exists(schema_file) == False:
+                        create_schema_file(csv_file, schema_file)
+                        
                     if os.path.exists(schema_file):
-                        header, data_types, column_sizes = read_table_definition(schema_file)
-                    else:
-                        header, data_types, column_sizes = infer_data_types_and_sizes(csv_file)
+                        header, data_types, column_sizes = read_table_definition(schema_file)  
 
                     create_table(table_name, header, data_types, column_sizes)
                     insert_data(table_name, header, csv_file)
@@ -323,4 +331,30 @@ for folder in folders:
                     error_message = f"Error processing {csv_file}: {e}\n{traceback.format_exc()}"
                     logging.error(error_message)
                     print(error_message)
-      
+
+# Main entry point      
+def main():
+    # Set up logging
+    logging.basicConfig(filename='import_log.log', level=logging.INFO)
+
+    log_and_print("Starting Import CSV script")
+
+    # Wait for PostgreSQL server to start
+    if not wait_for_postgres(**db_params):
+        log_and_print("Error: Unable to connect to PostgreSQL server.")
+        sys.exit(1)
+
+    log_and_print("PostgreSQL server is ready. Proceeding with data insertion.")
+
+    # Iterate through all CSV files in the 'data' folder
+    # walk through both the sample data folder and the data folder
+    folders = ['data', 'sample_data']
+
+    # get the full path of each folder to be parsed
+    for i in range(len(folders)):
+        folders[i] = os.path.join(os.getcwd(), folders[i])
+
+    parse_folders(folders)
+
+# Run the main function
+main()   

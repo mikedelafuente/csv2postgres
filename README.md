@@ -48,7 +48,7 @@ To get this project up and running on your local machine, follow these steps:
 
 To use the CSV to PostgreSQL importer, follow these steps:
 
-1. Place your CSV files in the `data` directory.
+1. Place your CSV files in the `data-import/data` directory. You can optionally clear out the `data-import/sample_data` folder. Note, tables will be named after the csv file name. So `sample.csv` will create a table labeled `sample`.
 
 2. Create a `.schema` file (e.g., `your_table_name.schema`) for each CSV file if you want to specify the database schema manually. The `.schema` file should contain the table schema in the following format:
 
